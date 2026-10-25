@@ -76,10 +76,10 @@ jobs:
             libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 2>/dev/null \
             || sudo apt-get install -y -qq --no-install-recommends libasound2
           python3 - <<'PY' > "$RUNNER_TEMP/chrome-url.txt"
-import json, urllib.request
-d = json.load(urllib.request.urlopen("https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"))
-print([x["url"] for x in d["channels"]["Stable"]["downloads"]["chrome"] if x["platform"] == "linux64"][0])
-PY
+          import json, urllib.request
+          d = json.load(urllib.request.urlopen("https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"))
+          print([x["url"] for x in d["channels"]["Stable"]["downloads"]["chrome"] if x["platform"] == "linux64"][0])
+          PY
           curl -sSL -o "$RUNNER_TEMP/chrome.zip" "$(cat "$RUNNER_TEMP/chrome-url.txt")"
           unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
           echo "CHROME=$RUNNER_TEMP/chrome-linux64/chrome" >> "$GITHUB_ENV"
