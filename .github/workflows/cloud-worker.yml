@@ -1,0 +1,112 @@
+name: Clay cloud render
+
+# Public runner shell for a private payload.
+#
+# In : clay-payload.tar.gz.enc  (AES-256-CBC, pbkdf2 200k; key only in the
+#      CLAY_PAYLOAD_KEY repository secret — never in this repo or its history)
+# Out: renders.tar.gz.enc      (same key, encrypted artifact)
+#
+# The ephemeral Ubuntu runner decrypts the payload, verifies the kit's SHA-256
+# against the value the controller passes in, renders the look matrix through
+# headless Chrome and/or Cycles heroes through the checksum-verified official
+# Blender build, then encrypts every output before uploading it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "matrix | hero | both"
+        required: true
+        default: matrix
+      samples:
+        description: "Cycles samples for hero mode"
+        required: false
+        default: "64"
+      heroes:
+        description: "Comma-separated look names for hero mode"
+        required: false
+        default: ""
+      kit_sha256:
+        description: "SHA-256 of the decrypted Offline kit (supplied by the controller)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  PAYLOAD_KEY: ${{ secrets.CLAY_PAYLOAD_KEY }}
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decrypt and verify the private payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PAYLOAD_KEY"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in clay-payload.tar.gz.enc -out "$RUNNER_TEMP/payload.tar.gz" -pass env:PAYLOAD_KEY
+          mkdir -p "$GITHUB_WORKSPACE/work"
+          tar -xzf "$RUNNER_TEMP/payload.tar.gz" -C "$GITHUB_WORKSPACE/work"
+          cd "$GITHUB_WORKSPACE/work"
+          expected="${{ inputs.kit_sha256 }}"
+          actual=$(sha256sum "Clay World Kit v3 Offline.html" | awk '{print $1}')
+          test "$expected" = "$actual"
+          echo "payload verified: $actual"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Chrome for Testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 2>/dev/null \
+            || sudo apt-get install -y -qq --no-install-recommends libasound2
+          python3 - <<'PY' > "$RUNNER_TEMP/chrome-url.txt"
+import json, urllib.request
+d = json.load(urllib.request.urlopen("https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"))
+print([x["url"] for x in d["channels"]["Stable"]["downloads"]["chrome"] if x["platform"] == "linux64"][0])
+PY
+          curl -sSL -o "$RUNNER_TEMP/chrome.zip" "$(cat "$RUNNER_TEMP/chrome-url.txt")"
+          unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
+          echo "CHROME=$RUNNER_TEMP/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          python3 -m pip install --quiet --disable-pip-version-check numpy pillow
+
+      - name: Render in the cloud
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/work"
+          bash cloud/cloud_run.sh "${{ inputs.mode }}" "${{ inputs.samples }}" "${{ inputs.heroes }}"
+
+      - name: Encrypt the results
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/work"
+          tar -czf "$RUNNER_TEMP/out.tar.gz" out
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in "$RUNNER_TEMP/out.tar.gz" -out "$GITHUB_WORKSPACE/renders.tar.gz.enc" \
+            -pass env:PAYLOAD_KEY
+
+      - name: Upload encrypted renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clay-renders
+          path: renders.tar.gz.enc
+          if-no-files-found: warn
+          retention-days: 14
