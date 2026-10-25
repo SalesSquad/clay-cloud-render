@@ -73,7 +73,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 2>/dev/null \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 \
+            libegl1 libgl1 libglx-mesa0 libxi6 libxxf86vm1 libxrender1 libsm6 libice6 \
+            2>/dev/null \
             || sudo apt-get install -y -qq --no-install-recommends libasound2
           python3 - <<'PY' > "$RUNNER_TEMP/chrome-url.txt"
           import json, urllib.request
